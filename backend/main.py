@@ -22,33 +22,44 @@ from bs4 import BeautifulSoup
 
 from fastapi.middleware.cors import CORSMiddleware
 
+# ================================
+# App + CORS
+# ================================
 app = FastAPI(title="QA-Agent Backend")
 
-# Add CORS so your UI (Streamlit) can talk to this backend
-origins = [
+# NOTE: For development you can use ["*"].
+# When you deploy, replace "*" with the exact Streamlit app origin:
+# e.g. "https://your-streamlit-subdomain.streamlit.app"
+CORS_ORIGINS = [
     "http://localhost:8501",
     "http://127.0.0.1:8501",
-    # when deployed, you'll add the Streamlit URL (or use "*" while testing)
+    # "https://app-agent-d6uqpfm5wsp37zyyfkks9p.streamlit.app"  <-- add your deployed UI origin here
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # during development you can use ["*"]; for production replace with specific origin
+    allow_origins=["*"],  # use CORS_ORIGINS here in production for tighter security
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ================================
+# Logging
+# ================================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("qa-agent")
 
+# ================================
+# Embedding / Chroma config
+# ================================
 CHROMA_DIR = "chroma_db"
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
 # ================================
-# Chroma client
+# Chroma client & collection
 # ================================
 client = PersistentClient(path=CHROMA_DIR)
 
@@ -66,74 +77,79 @@ except Exception:
 embed_model = SentenceTransformer(EMBED_MODEL_NAME)
 
 # ================================
-# FastAPI App
-# ================================
-app = FastAPI(title="QA-Agent Backend")
-
-# ================================
 # Persistent Testcase Storage
 # ================================
 TESTCASE_FILE = "generated_testcases.json"
 
 if os.path.exists(TESTCASE_FILE):
     try:
-        with open(TESTCASE_FILE, "r") as f:
+        with open(TESTCASE_FILE, "r", encoding="utf-8") as f:
             GENERATED_TESTCASES = json.load(f)
-    except:
+    except Exception:
         GENERATED_TESTCASES = {}
 else:
     GENERATED_TESTCASES = {}
 
 def save_testcases():
-    with open(TESTCASE_FILE, "w") as f:
-        json.dump(GENERATED_TESTCASES, f, indent=2)
-
+    try:
+        with open(TESTCASE_FILE, "w", encoding="utf-8") as f:
+            json.dump(GENERATED_TESTCASES, f, indent=2)
+    except Exception as e:
+        logger.exception(f"Failed to save testcases: {e}")
 
 # ================================
-# Helper: Extract Text
+# Helpers
 # ================================
 def extract_text_from_file(filename: str, bytes_data: bytes) -> str:
+    """
+    Heuristic extractor for html, md, txt, json, pdf.
+    """
     name = filename.lower()
     text = ""
 
     try:
-        if name.endswith(".html"):
+        if name.endswith(".html") or name.endswith(".htm"):
             soup = BeautifulSoup(bytes_data.decode("utf-8", errors="ignore"), "html.parser")
             text = soup.get_text(separator="\n")
 
-            elements = []
+            # collect element attribute summaries (helpful for selector grounding)
+            els = []
             for el in soup.find_all(True):
-                attrs = {k: v for k, v in el.attrs.items()
-                         if k in ("id", "name", "class", "type", "placeholder")}
+                attrs = {k: v for k, v in el.attrs.items() if k in ("id", "name", "class", "type", "placeholder")}
                 if attrs:
-                    elements.append(f"<{el.name}> attrs={attrs} text={el.get_text().strip()[:60]}")
-
-            if elements:
-                text += "\n\nHTML_ELEMENTS:\n" + "\n".join(elements)
+                    els.append(f"<{el.name}> attrs={attrs} text={el.get_text().strip()[:60]}")
+            if els:
+                text += "\n\nHTML_ELEMENTS:\n" + "\n".join(els)
 
         elif name.endswith((".md", ".txt", ".json")):
-            text = bytes_data.decode("utf-8", errors="ignore")
+            try:
+                text = bytes_data.decode("utf-8", errors="ignore")
+            except Exception:
+                text = str(bytes_data)
 
         elif name.endswith(".pdf"):
             try:
-                import fitz
+                import fitz  # PyMuPDF
                 doc = fitz.open(stream=bytes_data, filetype="pdf")
                 pages = [p.get_text() for p in doc]
                 text = "\n".join(pages)
-            except:
+            except Exception as e:
+                logger.warning(f"PDF extraction failed for {filename}: {e}")
                 text = ""
 
         else:
-            text = bytes_data.decode("utf-8", errors="ignore")
-
-    except Exception:
+            try:
+                text = bytes_data.decode("utf-8", errors="ignore")
+            except Exception:
+                text = ""
+    except Exception as e:
+        logger.exception(f"Error extracting text from {filename}: {e}")
         text = ""
 
     return text
 
-
 # ================================
-# Upload Files API
+# Endpoints
 # ================================
 @app.post("/upload_files/")
 async def upload_files(files: List[UploadFile] = File(...)):
@@ -143,82 +159,89 @@ async def upload_files(files: List[UploadFile] = File(...)):
 
     for f in files:
         path = os.path.join(upload_dir, f.filename)
-        data = await f.read()
+        content = await f.read()
         with open(path, "wb") as fh:
-            fh.write(data)
+            fh.write(content)
         saved.append({"filename": f.filename, "path": path})
+        logger.info(f"Saved uploaded file to {path}")
 
     return {"status": "ok", "saved": saved}
 
 
-# ================================
-# Build Knowledge Base
-# ================================
 @app.post("/build_kb/")
 async def build_kb(
     file_paths: List[str] = Body(...),
     chunk_size: int = Body(1000),
     chunk_overlap: int = Body(200)
 ):
-    logger.info(f"[build_kb] Received file paths: {file_paths}")
+    """
+    Build knowledge base from provided file paths.
+    Accepts a JSON body with:
+      - file_paths: list of local paths (strings)
+      - chunk_size, chunk_overlap: integers
+    """
+    logger.info(f"[build_kb] received file_paths = {file_paths}")
 
     docs = []
     metadatas = []
     ids = []
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
-    for path in file_paths:
+    for raw_path in file_paths:
+        if not isinstance(raw_path, str):
+            continue
+        # normalize path separators
+        path = raw_path.replace("\\\\", "\\").replace("/", os.sep).replace("\\", os.sep)
+
         if not os.path.exists(path):
-            logger.warning(f"[build_kb] Missing file: {path}")
+            logger.warning(f"[build_kb] path not found: {path}")
             continue
 
-        with open(path, "rb") as f:
-            raw = f.read()
+        with open(path, "rb") as fh:
+            b = fh.read()
 
-        text = extract_text_from_file(path, raw)
+        text = extract_text_from_file(path, b)
         if not text:
-            logger.warning(f"[build_kb] No text extracted: {path}")
+            logger.warning(f"[build_kb] no text extracted from: {path}")
             continue
 
         chunks = splitter.split_text(text)
-
-        for idx, chunk in enumerate(chunks):
-            uid = str(uuid.uuid4())
-
+        for i, chunk in enumerate(chunks):
+            doc_id = str(uuid.uuid4())
             docs.append(chunk)
-            metadatas.append({
-                "source": os.path.basename(path),
-                "path": path,
-                "chunk_index": idx
-            })
-            ids.append(uid)
+            metadatas.append({"source": os.path.basename(path), "path": path, "chunk_index": i})
+            ids.append(doc_id)
 
-    if not docs:
-        return {"status": "no_docs_found", "received": file_paths}
+    if len(docs) == 0:
+        return {"status": "no_docs_found", "received_paths": file_paths}
 
-    embeddings = embed_model.encode(docs, convert_to_numpy=True).tolist()
+    embeddings = embed_model.encode(docs, show_progress_bar=False, convert_to_numpy=True)
 
-    collection.add(
-        documents=docs,
-        ids=ids,
-        metadatas=metadatas,
-        embeddings=embeddings
-    )
+    # Add to Chroma collection
+    try:
+        collection.add(
+            documents=docs,
+            metadatas=metadatas,
+            ids=ids,
+            embeddings=embeddings.tolist()
+        )
+    except Exception as e:
+        # Some chroma builds accept numpy arrays directly; try fallback
+        try:
+            collection.add(documents=docs, metadatas=metadatas, ids=ids, embeddings=embeddings)
+        except Exception:
+            logger.exception(f"Failed adding to chroma collection: {e}")
+            return {"status": "error", "error": "chroma_add_failed", "details": str(e)}
 
-    return {
-        "status": "kb_built",
-        "num_chunks": len(docs),
-        "ingested_files": list({m["source"] for m in metadatas})
-    }
+    logger.info(f"[build_kb] ingested {len(docs)} chunks from {len(set([m['source'] for m in metadatas]))} files")
+
+    return {"status": "kb_built", "num_chunks": len(docs), "ingested_files": list({m['source'] for m in metadatas})}
 
 
-# ================================
-# Testcase Generation
-# ================================
+# ---------------------------
+# Testcase generation (simple rule-based)
+# ---------------------------
 class QueryRequest(BaseModel):
     query: str
     top_k: int = 5
@@ -226,21 +249,23 @@ class QueryRequest(BaseModel):
 
 @app.post("/generate_testcases/")
 async def generate_testcases(req: QueryRequest):
-    result = collection.query(
-        query_texts=[req.query],
-        n_results=req.top_k
-    )
-
-    if not result.get("documents") or not result["documents"][0]:
-        return {"status": "ok", "generated": [], "retrieved": 0}
+    # Retrieve top_k docs from Chroma
+    try:
+        results = collection.query(query_texts=[req.query], n_results=req.top_k)
+    except Exception as e:
+        logger.exception(f"Chroma query failed: {e}")
+        return {"status": "error", "error": "chroma_query_failed", "details": str(e)}
 
     retrieved_docs = []
-    for text, meta in zip(result["documents"][0], result["metadatas"][0]):
-        retrieved_docs.append({"text": text, "meta": meta})
+    try:
+        for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+            retrieved_docs.append({"text": doc, "meta": meta})
+    except Exception:
+        logger.warning("Unexpected results shape from collection.query()")
+        retrieved_docs = []
 
-    # Simple rule-based testcase generator
+    # Simple rule-based testcase generator (no LLM)
     testcases = []
-
     for idx, item in enumerate(retrieved_docs, start=1):
         tc = {
             "Test_ID": f"TC-{idx:03}",
@@ -254,25 +279,20 @@ async def generate_testcases(req: QueryRequest):
         testcases.append({"id": key, "payload": tc})
 
     save_testcases()
-
     return {"status": "ok", "generated": testcases, "retrieved": len(retrieved_docs)}
 
 
-# ================================
-# List Testcases
-# ================================
 @app.get("/list_testcases/")
 async def list_testcases():
-    return {
-        "count": len(GENERATED_TESTCASES),
-        "items": list(GENERATED_TESTCASES.values())
-    }
-# ================================
-# Generate Selenium Script
-# ================================
+    return {"count": len(GENERATED_TESTCASES), "items": list(GENERATED_TESTCASES.values())}
 
+
+# ---------------------------
+# Selenium script generation
+# ---------------------------
 class SeleniumRequest(BaseModel):
     testcase_id: str
+
 
 @app.post("/generate_selenium_script/")
 async def generate_selenium_script(req: SeleniumRequest):
@@ -282,7 +302,7 @@ async def generate_selenium_script(req: SeleniumRequest):
 
     testcase = tc["payload"]
 
-    # Simple static selenium script (no GPT)
+    # Simple static selenium script (no GPT) - user should replace selectors with real ones
     script = f"""
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -294,8 +314,8 @@ driver.get("http://example.com/checkout")
 
 print("Running Testcase: {testcase['Test_ID']}")
 
-# NOTE: This is a placeholder script because no DOM is loaded.
-# Replace selectors with the real page selectors.
+# NOTE: This is a placeholder script because no real DOM was inspected.
+# Replace selectors and steps with the real page selectors and assertions.
 
 try:
     print("Test Scenario: {testcase['Test_Scenario']}")
@@ -310,6 +330,7 @@ except Exception as e:
     print("✗ Test failed:", e)
 
 driver.quit()
-"""
+""".strip()
 
-    return {"status": "ok", "script": script}
+    # Return both keys to support different UI versions
+    return {"status": "ok", "script": script, "selenium_script": script}
