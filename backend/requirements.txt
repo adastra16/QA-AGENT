@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+chromadb
+sentence-transformers
+langchain-text-splitters
+beautifulsoup4
+pymupdf
+requests

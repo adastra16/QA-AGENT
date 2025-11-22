@@ -9,6 +9,7 @@ BACKEND_URL = "https://unasked-busiest-yahir.ngrok-free.dev"
 
 
 
+
 # Local path to a saved generated script (for quick demo / optional)
 LOCAL_SCRIPT_PATH = r"C:\Users\RUPSA NANDA\OneDrive\Desktop\QA-AGENT\uploaded_docs\selenium_.py"
 
