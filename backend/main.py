@@ -1,4 +1,4 @@
-# backend/main.py
+
 import os
 import json
 import uuid
@@ -16,9 +16,6 @@ from bs4 import BeautifulSoup
 from fastapi.middleware.cors import CORSMiddleware
 
 
-# ================================
-# FastAPI + CORS
-# ================================
 app = FastAPI(title="QA-Agent Backend")
 
 app.add_middleware(
@@ -29,17 +26,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ================================
-# Logging
-# ================================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("qa-agent")
 
 
-# ================================
-# Embedding / Chroma
-# ================================
 CHROMA_DIR = "chroma_db"
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
@@ -58,9 +48,7 @@ except Exception:
 embed_model = SentenceTransformer(EMBED_MODEL_NAME)
 
 
-# ================================
-# Persistent Testcase Storage
-# ================================
+
 TESTCASE_FILE = "generated_testcases.json"
 if os.path.exists(TESTCASE_FILE):
     try:
@@ -77,9 +65,6 @@ def save_testcases():
         json.dump(GENERATED_TESTCASES, f, indent=2)
 
 
-# ================================
-# Extract text from files
-# ================================
 def extract_text_from_file(filename: str, bytes_data: bytes) -> str:
     name = filename.lower()
 
@@ -116,9 +101,7 @@ def extract_text_from_file(filename: str, bytes_data: bytes) -> str:
         return ""
 
 
-# ================================
-# Upload Files
-# ================================
+
 @app.post("/upload_files/")
 async def upload_files(files: List[UploadFile] = File(...)):
     saved = []
@@ -134,9 +117,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
     return {"status": "ok", "saved": saved}
 
 
-# ================================
-# build_kb
-# ================================
+
 @app.post("/build_kb/")
 async def build_kb(
     file_paths: List[str] = Body(...),
@@ -199,9 +180,6 @@ async def build_kb(
     }
 
 
-# ================================
-# Generate Testcases (rule-based)
-# ================================
 class QueryRequest(BaseModel):
     query: str
     top_k: int = 5
@@ -243,17 +221,12 @@ async def generate_testcases(req: QueryRequest):
     return {"status": "ok", "generated": generated, "retrieved": len(retrieved)}
 
 
-# ================================
-# List Testcases
-# ================================
+
 @app.get("/list_testcases/")
 async def list_testcases():
     return {"count": len(GENERATED_TESTCASES), "items": list(GENERATED_TESTCASES.values())}
 
 
-# ================================
-# Generate CLEAN Selenium Script (no comments)
-# ================================
 class SeleniumRequest(BaseModel):
     testcase_id: str
 
