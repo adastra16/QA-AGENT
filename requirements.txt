@@ -1,14 +1,9 @@
 fastapi
 uvicorn[standard]
-streamlit
 python-multipart
-langchain
 chromadb
 sentence-transformers
+langchain-text-splitters
 beautifulsoup4
-bs4
-pydantic
+pymupdf
 requests
-transformers>=4.30.0
-torch
-pytest   # optional for tests
