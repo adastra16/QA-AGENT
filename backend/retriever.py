@@ -1,5 +1,7 @@
+# backend/retriever.py
 """
-Lightweight cosine-similarity retriever using MiniLM-L3-v2 (low RAM).
+Simple cosine-similarity retriever using saved embeddings + metadata (sentence-transformers).
+This version normalizes vectors and is safe to run locally.
 """
 
 import json
@@ -11,47 +13,39 @@ from sentence_transformers import SentenceTransformer
 
 EMBED_FILE = Path("ingest/embeddings.npy")
 META_FILE = Path("ingest/embeddings_meta.json")
-
-# Smaller model (less RAM on Render)
-MODEL_NAME = "paraphrase-MiniLM-L3-v2"
-
+MODEL_NAME = "all-MiniLM-L6-v2"
 
 class Retriever:
     def __init__(self, model_name: str = MODEL_NAME):
-
         if not EMBED_FILE.exists():
-            raise FileNotFoundError(f"{EMBED_FILE} missing. Run ingest first.")
+            raise FileNotFoundError(f"{EMBED_FILE} not found. Run ingest/embedChunks.py first.")
         if not META_FILE.exists():
-            raise FileNotFoundError(f"{META_FILE} missing. Run ingest first.")
+            raise FileNotFoundError(f"{META_FILE} not found. Run ingest/embedChunks.py first.")
 
-        # Load vectors
         self.vectors = np.load(EMBED_FILE)
-
         meta_text = META_FILE.read_text(encoding="utf-8")
         self.meta = json.loads(meta_text)
 
-        # Normalize embeddings
         norms = np.linalg.norm(self.vectors, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         self.vectors = self.vectors / norms
 
-        # Load small model
+        # Make sure we can embed queries with the same model
         self.model = SentenceTransformer(model_name)
 
     def embed_query(self, text: str) -> np.ndarray:
         vec = self.model.encode([text])[0]
         norm = np.linalg.norm(vec)
-        return vec / norm if norm != 0 else vec
+        if norm == 0:
+            return vec
+        return vec / norm
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         if not query:
             return []
-
         qvec = self.embed_query(query)
-
         scores = np.dot(self.vectors, qvec)
         top_k_idx = np.argsort(-scores)[:top_k]
-
         results = []
         for idx in top_k_idx:
             m = self.meta[idx]
@@ -62,18 +56,16 @@ class Retriever:
                 "index": m.get("index") or m.get("chunk_index"),
                 "text": m.get("text")
             })
-
         return results
-
 
 if __name__ == "__main__":
     r = Retriever()
-    print("Retriever loaded.")
+    print("Retriever ready. Type a query (empty to exit).")
     while True:
-        q = input("\nQuery> ").strip()
+        q = input("\nQuery (empty to quit)> ").strip()
         if not q:
             break
-        res = r.retrieve(q)
+        res = r.retrieve(q, top_k=5)
         for i, r0 in enumerate(res):
-            print(f"\n[{i+1}] score={r0['score']:.4f}, {r0['source']}, idx={r0['index']}")
-            print(r0['text'][:300].replace("\n", " "))
+            print(f"\n[{i+1}] score={r0['score']:.4f} source={r0['source']} idx={r0['index']}")
+            print(r0['text'][:400].replace("\n", " ") + ("..." if len(r0['text']) > 400 else ""))

@@ -70,5 +70,41 @@
         "faq.json"
       ]
     }
+  },
+  "7f37b4e8-913f-44c6-8586-44f08c10d6c2": {
+    "id": "7f37b4e8-913f-44c6-8586-44f08c10d6c2",
+    "payload": {
+      "Test_ID": "TC-001",
+      "Feature": "Auto-generated",
+      "Test_Scenario": "Validate: test checkout flow",
+      "Expected_Result": "Works as expected.",
+      "Grounded_In": [
+        "checkout.html"
+      ]
+    }
+  },
+  "5c691e50-7e13-4ee3-8389-609590ee67d6": {
+    "id": "5c691e50-7e13-4ee3-8389-609590ee67d6",
+    "payload": {
+      "Test_ID": "TC-002",
+      "Feature": "Auto-generated",
+      "Test_Scenario": "Validate: test checkout flow",
+      "Expected_Result": "Works as expected.",
+      "Grounded_In": [
+        "checkout.html"
+      ]
+    }
+  },
+  "f8ca14f3-754b-4f2b-8775-de82794cb647": {
+    "id": "f8ca14f3-754b-4f2b-8775-de82794cb647",
+    "payload": {
+      "Test_ID": "TC-003",
+      "Feature": "Auto-generated",
+      "Test_Scenario": "Validate: test checkout flow",
+      "Expected_Result": "Works as expected.",
+      "Grounded_In": [
+        "checkout.html"
+      ]
+    }
   }
 }

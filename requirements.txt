@@ -1,10 +1,12 @@
 fastapi
-uvicorn
-sentence-transformers==2.2.2
-chromadb==0.4.24
-unstructured
-pymupdf
+uvicorn[standard]
 python-multipart
-pydantic
-jinja2
-streamlit
+chromadb==0.4.24
+openai
+sentence-transformers
+numpy==1.26.4
+pydantic==1.10.13
+beautifulsoup4
+python-dotenv
+fitz==0.0.1  # optional, PyMuPDF packaging varies; prefer installing pymupdf
+pymupdf
