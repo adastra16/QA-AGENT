@@ -1,9 +1,10 @@
 fastapi
-uvicorn[standard]
-python-multipart
-chromadb
-sentence-transformers
-langchain-text-splitters
-beautifulsoup4
+uvicorn
+sentence-transformers==2.2.2
+chromadb==0.4.24
+unstructured
 pymupdf
-requests
+python-multipart
+pydantic
+jinja2
+streamlit
