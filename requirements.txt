@@ -1,12 +1,11 @@
 fastapi
-uvicorn[standard]
-python-multipart
-chromadb==0.4.24
-openai
+uvicorn
+chromadb==0.5.3
 sentence-transformers
-numpy==1.26.4
-pydantic==1.10.13
-beautifulsoup4
 python-dotenv
-fitz==0.0.1  # optional, PyMuPDF packaging varies; prefer installing pymupdf
-pymupdf
+langchain
+PyMuPDF==1.23.8
+bs4
+requests
+pydantic
+numpy==1.26.4
